@@ -82,7 +82,6 @@ def create_checkout():
         },
         'merchant_account_id': MERCHANT_ACCOUNTS[curr]
     })
-    import ipdb; ipdb.set_trace();
     if result.is_success or result.transaction:
         session["payment_method_token"] = result.transaction.credit_card_details.token
         return redirect(url_for('show_checkout', transaction_id=result.transaction.id))
