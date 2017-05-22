@@ -1,0 +1,57 @@
+{% extends 'layout.html' %}
+{% block content %}
+
+<div class="wrapper">
+  <div class="checkout container">
+
+    <header>
+      <h1>Buy The Thing</h1>
+      <p>
+        Really nice Thing, you should buy it
+      </p>
+      <h2>Only $299.99<small style="color: grey">(&euro;267.67)</small></h2>
+    </header>
+
+    <form id="payment-form" method="post" action="/checkouts">
+          <label for="currency">
+            <span class="">Currency</span>
+            <div class="input-wrapper currency-wrapper">
+              <select id="currency" name="currency">
+                <option value="usd" selected="selected">$ USD $</option>
+                <option value="eu">&euro; EURO &euro;</option>
+              </select>
+            </div>
+          </label>
+          <label for="amount">
+            <span class="">Amount</span>
+            <div class="input-wrapper amount-wrapper">
+              <input id="amount" name="amount" type="number" min="1" placeholder="Amount" value="1">
+            </div>
+          </label>
+      <section>
+        <div class="bt-drop-in-wrapper">
+          <div id="bt-dropin"></div>
+        </div>
+
+          <input name="price_usd" type="hidden" value="299.99">
+          <input name="price_eu" type="hidden" value="267.67">
+        </section>
+
+      <button class="button" type="submit"><span>Checkout</span></button>
+    </form>
+
+  </div>
+</div>
+
+<script src="https://js.braintreegateway.com/js/braintree-2.27.0.min.js"></script>
+<script>
+  var checkout = new Demo({
+    formID: 'payment-form'
+  })
+
+  var client_token = '{{ client_token }}';
+  braintree.setup(client_token, "dropin", {
+    container: "bt-dropin"
+  });
+</script>
+{% endblock %}
