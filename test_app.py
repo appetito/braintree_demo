@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 import unittest
-import mock
+from unittest import mock
 import test_helpers
 
-import os
 import app
-import tempfile
+
 
 @mock.patch('braintree.ClientToken.generate', staticmethod(lambda: 'test_client_token'))
 @mock.patch('braintree.Transaction.find', staticmethod(lambda x: test_helpers.MockObjects.TRANSACTION_SUCCESSFUL))
@@ -39,7 +38,7 @@ class AppTestCase(unittest.TestCase):
     def test_checkout_includes_amount_input(self):
         res = self.app.get('/checkouts/new')
         self.assertIn(b'<label for="amount"', res.data)
-        self.assertIn(b'<input id="amount" name="amount" type="tel"', res.data)
+        self.assertIn(b'<input id="amount" name="amount" type="number"', res.data)
 
     def test_checkouts_show_route_available(self):
         res = self.app.get('/checkouts/1')
@@ -54,6 +53,7 @@ class AppTestCase(unittest.TestCase):
         self.assertIn(b'Billson', res.data)
         self.assertIn(b'Billy Bobby Pins', res.data)
         self.assertIn(b'submitted_for_settlement', res.data)
+        self.assertIn(b'input name="tx_id" type="hidden" value="my_id"', res.data)
 
     def test_checkouts_show_displays_success_message_when_transaction_succeeded(self):
         res = self.app.get('/checkouts/1')
@@ -64,21 +64,72 @@ class AppTestCase(unittest.TestCase):
             res = self.app.get('/checkouts/1')
             self.assertIn(b'Transaction Failed', res.data)
 
-    @mock.patch('braintree.Transaction.sale', staticmethod(lambda x: test_helpers.MockObjects.TRANSACTION_SALE_SUCCESSFUL))
-    def test_checkouts_create_redirects_to_checkouts_show(self):
+    @mock.patch('braintree.Transaction')
+    def test_checkouts_create_redirects_to_checkouts_show(self, mock_tx):
+        mock_tx.sale.return_value = test_helpers.MockObjects.TRANSACTION_SALE_SUCCESSFUL
         res = self.app.post('/checkouts', data={
             'payment_method_nonce': 'some_nonce',
-            'amount': '12.34',
+            'amount': '1',
+            'currency': 'eu',
+            'price_eu': '199',
         })
         self.assertEqual(res.status_code, 302)
         self.assertIn('/checkouts/my_id', res.location)
+        mock_tx.sale.assert_called_with({
+            'payment_method_nonce': 'some_nonce',
+            'amount': 199,
+            'merchant_account_id': 'my_euro_id',
+            'options': {'submit_for_settlement': True, 'store_in_vault_on_success': True}
+        })
+
+    @mock.patch('braintree.Transaction')
+    def test_checkouts_one_more(self, mock_tx):
+        mock_tx.sale.return_value = test_helpers.MockObjects.TRANSACTION_SALE_SUCCESSFUL
+        with app.app.test_client() as c:
+            with c.session_transaction() as sess:
+                sess["payment_method_token"] = 'secret'
+            res = c.post('/checkouts/one_more', data={
+                'price': '199',
+            })
+        self.assertEqual(res.status_code, 302)
+        self.assertIn('/checkouts/my_id', res.location)
+        mock_tx.sale.assert_called_with({
+            'amount': '199',
+            'payment_method_token': 'secret',
+            'options': {'submit_for_settlement': True}
+        })
+
+    @mock.patch('braintree.Transaction')
+    def test_checkouts_with_different_billing_info(self, mock_tx):
+        mock_tx.sale.return_value = test_helpers.MockObjects.TRANSACTION_SALE_SUCCESSFUL
+        res = self.app.post('/checkouts', data={
+            'payment_method_nonce': 'some_nonce',
+            'amount': '1',
+            'currency': 'eu',
+            'price_eu': '199',
+            'email': 'my@mail.com',
+            'address': 'MyAddress',
+            'use_diff_bill_info': 'on'
+        })
+        self.assertEqual(res.status_code, 302)
+        self.assertIn('/checkouts/my_id', res.location)
+        mock_tx.sale.assert_called_with({
+            'payment_method_nonce': 'some_nonce',
+            'amount': 199,
+            'merchant_account_id': 'my_euro_id',
+            'options': {'submit_for_settlement': True, 'store_in_vault_on_success': True},
+            'customer': {'email': 'my@mail.com'},
+            'billing': {'street_address': 'MyAddress'},
+        })
 
     @mock.patch('braintree.Transaction.sale', staticmethod(lambda x: test_helpers.MockObjects.TRANSACTION_SALE_SUCCESSFUL))
     def test_hides_customer_details_if_none(self):
         with mock.patch('braintree.Transaction.find', staticmethod(lambda x: test_helpers.MockObjects.TRANSACTION_NO_CUSTOMER)):
             res = self.app.post('/checkouts', follow_redirects=True, data={
                 'payment_method_nonce': 'some_nonce',
-                'amount': '12.34',
+                'amount': '4',
+                'currency': 'usd',
+                'price_usd': '199',
             })
 
             self.assertNotIn(b'Customer Details', res.data)
@@ -87,7 +138,9 @@ class AppTestCase(unittest.TestCase):
     def test_checkouts_create_redirects_to_checkouts_new_when_transaction_unsuccessful(self):
         res = self.app.post('/checkouts', data={
             'payment_method_nonce': 'some_invalid_nonce',
-            'amount': '12.34',
+            'amount': '1',
+            'currency': 'usd',
+            'price_usd': '199',
         })
         self.assertEqual(res.status_code, 302)
         self.assertIn('/checkouts/new', res.location)
@@ -96,7 +149,9 @@ class AppTestCase(unittest.TestCase):
     def test_checkouts_create_displays_errors_when_transaction_unsuccessful(self):
         res = self.app.post('/checkouts', follow_redirects=True, data={
             'payment_method_nonce': 'some_invalid_nonce',
-            'amount': '12.34',
+            'amount': '2',
+            'currency': 'usd',
+            'price_usd': '199',
         })
         self.assertIn(b'Error: 12345: Transaction was unsuccessful', res.data)
         self.assertIn(b'Error: 67890: Transaction was really unsuccessful', res.data)
@@ -105,7 +160,9 @@ class AppTestCase(unittest.TestCase):
     def test_checkouts_create_redirects_to_checkouts_new_when_processor_errors_present(self):
         res = self.app.post('/checkouts', data={
             'payment_method_nonce': 'some_invalid_nonce',
-            'amount': '12.34',
+            'amount': '2',
+            'currency': 'usd',
+            'price_usd': '199',
         })
         self.assertIn('/checkouts/my_id', res.location)
 
@@ -115,8 +172,12 @@ class AppTestCase(unittest.TestCase):
             res = self.app.post('/checkouts', follow_redirects=True, data={
                 'payment_method_nonce': 'some_invalid_nonce',
                 'amount': '2000',
+                'currency': 'usd',
+                'price_usd': '199',
             })
             self.assertIn(b'Your test transaction has a status of processor_declined.', res.data)
+
+
 
 if __name__ == '__main__':
     unittest.main()

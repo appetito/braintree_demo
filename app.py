@@ -73,7 +73,8 @@ def create_checkout():
     price_key = 'price_' + curr
     price = decimal.Decimal(request.form[price_key])
     tx_amount = int(request.form['amount']) * price
-    result = braintree.Transaction.sale({
+
+    tx_data = {
         'amount': tx_amount,
         'payment_method_nonce': request.form['payment_method_nonce'],
         'options': {
@@ -81,7 +82,12 @@ def create_checkout():
             "store_in_vault_on_success": True
         },
         'merchant_account_id': MERCHANT_ACCOUNTS[curr]
-    })
+    }
+
+    if request.form.get("use_diff_bill_info"):
+        tx_data["customer"] = {"email": request.form["email"]}
+        tx_data["billing"] = {"street_address": request.form["address"]}
+    result = braintree.Transaction.sale(tx_data)
     if result.is_success or result.transaction:
         session["payment_method_token"] = result.transaction.credit_card_details.token
         return redirect(url_for('show_checkout', transaction_id=result.transaction.id))
